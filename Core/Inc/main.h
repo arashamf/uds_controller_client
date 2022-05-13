@@ -84,14 +84,13 @@ void Error_Handler(void);
 #define LCD_CS_GPIO_Port GPIOB
 #define RTC_RST_Pin GPIO_PIN_0
 #define RTC_RST_GPIO_Port GPIOE
-#define SD_OC_Pin GPIO_PIN_1
-#define SD_OC_GPIO_Port GPIOE
 /* USER CODE BEGIN Private defines */
 #define RS232_BUFFER_SIZE 100 //размер буффера для передачи UART3
 #define RX_BUFFER_SIZE 7 //размер приёмного буффера для сообщений по RS-485
 #define MAX_SELL 8 //количество ячеек
 #define RTC_ADDRESS 0xD0 //i2c-адрес мк RTC со сдвигом влево на один разряд 
 #define FLASH_IP_ADDRESS 0x080FF030 //адресс для хранения ip-адреса
+#define TCP_PORT 25006 //адресс для хранения ip-адреса
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

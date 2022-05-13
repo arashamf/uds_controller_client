@@ -61,20 +61,25 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-const char httpHeader[] = "130.193.44.244:8883" ;  // HTTP header
+extern uint8_t IP_ADDRESS[4]; //установленный ip-адрес в виде четырёх uint8_t (lwip.c)  
+extern char UART3_msg_TX [RS232_BUFFER_SIZE];
+char lcd_buffer [50]; //буффер с конвертированными данными времени в строковом отображении
 
+const unsigned char httpHeader[] = "HTTP/1.1" ;  // HTTP header
+const unsigned char httpMethod[] = "GET";
+const unsigned char state[] = "/?command=port00_state";
+const unsigned char httpMimeTypeHTML[] = "text/html" ;              // HTML MIME type
+const unsigned char httpMimeTypeScript[] = "text/plain" ;           // TEXT MIME type
+const unsigned char httpTypeConnection[] = "Connection: keep-alive" ; 
+const unsigned char serverIP [] = { 192, 168, 7, 13};
+	
 char http_send_buffer [100]; //буффер, в который записывается сформированный http-запрос
-
-typedef struct struct_conn_t {
-  uint32_t conn;
-  uint32_t buf;
-} struct_conn;
-struct_conn conn01;
 
 osMutexId mutex_RS485_Handle; //мьютекс блокировки передачи команд ячейкам
 
 osMessageQId RS485_msg_Queue;
 
+osTimerId osProgTimerIWDG;  //программный таймер перезагружающий сторожевик
 /* USER CODE END Variables */
 osThreadId defaultTaskHandle;
 
@@ -82,6 +87,7 @@ osThreadId defaultTaskHandle;
 /* USER CODE BEGIN FunctionPrototypes */
 void send_thread (void * argument);
 void recv_thread (void * argument);
+void ProgTimerIWDGCallback(void const *argument);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void const * argument);
@@ -141,7 +147,8 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_SEMAPHORES */
 
   /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
+   osTimerDef (TimerIWDG, ProgTimerIWDGCallback);
+	osProgTimerIWDG = osTimerCreate(osTimer (TimerIWDG), osTimerPeriodic, NULL);
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
@@ -172,20 +179,34 @@ void StartDefaultTask(void const * argument)
   /* init code for LWIP */
   MX_LWIP_Init();
   /* USER CODE BEGIN StartDefaultTask */
-	struct netconn *conn; //указатель на переменную структуры соединения
+	osTimerStart(osProgTimerIWDG, 2000); //запуск циклического таймера
+	struct netconn *conn; //указатель на структуру соединения
   err_t err; //переменная ошибки
   ip_addr_t ServerIPaddr;
-  IP4_ADDR(&ServerIPaddr, 192, 168, 7, 13);
+  IP4_ADDR(&ServerIPaddr, 192, 168, 7, 247); //запись ip-адреса http-сервера
+	u16_t buflen = 0;
 	
   if((conn = netconn_new(NETCONN_TCP)) != NULL)
   {
-    if ((err = netconn_bind(conn, NULL, 23006)) == ERR_OK)
+    if ((err = netconn_bind(conn, NULL, 23006)) == ERR_OK) //привязка нового netconn-соединения к IP-адресу и порту
     {
-      if ((err = netconn_connect(conn, &ServerIPaddr, 25006)) == ERR_OK)
+      if ((err = netconn_connect(conn, &ServerIPaddr, TCP_PORT)) == ERR_OK) //установка соединения с сервером
       {
-        conn01.conn = conn;
-        sys_thread_new("send_thread", send_thread, (void*)&conn01, DEFAULT_THREAD_STACKSIZE, osPriorityNormal );
-        sys_thread_new("recv_thread", recv_thread, (void*)&conn01, DEFAULT_THREAD_STACKSIZE, osPriorityNormal );
+				ClearLcdMemory();
+				sprintf (lcd_buffer, "get_connect");
+				LCD_ShowString(2, 2 , lcd_buffer);
+				LCD_Refresh();
+ //       sys_thread_new("send_thread", send_thread, (void*)&conn, 512, osPriorityNormal );
+				buflen = sprintf (http_send_buffer, "%s %s %s\r\nHost: %u.%u.%u.%u:%u\r\nContent-Type:%s\r\n", httpMethod, state, httpHeader, 
+				serverIP[0], serverIP[1], serverIP[2], serverIP[3], TCP_PORT, httpMimeTypeHTML);
+				if((err = netconn_write(conn, (void *)http_send_buffer, buflen, NETCONN_NOCOPY)) == ERR_OK)
+				{
+					ClearLcdMemory();
+					sprintf (lcd_buffer, "%s %u", http_send_buffer, buflen);
+					LCD_ShowString(2, 2 , lcd_buffer);
+					LCD_Refresh();
+				}
+        sys_thread_new("recv_thread", recv_thread, (void*)&conn, DEFAULT_THREAD_STACKSIZE, osPriorityNormal );
       }
     }
     else
@@ -206,39 +227,41 @@ void StartDefaultTask(void const * argument)
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
-//---------------------------------------------------------------
-static void send_thread(void *arg)
+
+/************************************************************************************************/
+void send_thread(void *arg)
 {
-	err_t sent_err;
-  struct_conn *arg_conn;
-  struct netconn *conn;
-  arg_conn = (struct_conn*) arg;
-  conn = (void*)arg_conn->conn;
-  uint32_t syscnt = 0;
+	err_t send_err;
+	struct netconn *conn; //указатель на структуру соединения
+	u16_t buflen;
+
+	buflen = sprintf (http_send_buffer, "%s %s %s\r\nHost: %u.%u.%u.%u:%u\r\n", httpMethod, state, httpHeader, serverIP[0], serverIP[1], serverIP[2], serverIP[3], TCP_PORT);
   for(;;)
   {
-  	sent_err = netconn_write(conn, (void *) &syscnt, 4, NETCONN_COPY);
-  	if(sent_err == ERR_OK)
+		ClearLcdMemory();
+  	if((send_err = netconn_write(conn, (void *)http_send_buffer, buflen, NETCONN_NOCOPY)) == ERR_OK)
   	{
-  	  qstruct = osMailAlloc(strout_Queue, osWaitForever);
-  	  osMailPut(strout_Queue, qstruct);
-  	  osMailFree(strout_Queue, qstruct);
+			sprintf (lcd_buffer, "%s %u", http_send_buffer, buflen);
+			LCD_ShowString(2, 2 , lcd_buffer);
   	}
+		else
+		{
+			sprintf (lcd_buffer, "error=%u", send_err);
+			LCD_ShowString(2, 2 , lcd_buffer);
+		}
+		LCD_Refresh();
     osDelay(1000);
   }
 }
-//---------------------------------------------------------------
-static void recv_thread(void *arg)
+
+/************************************************************************************************/
+void recv_thread(void *arg)
 {
 	err_t recv_err;
-  struct_conn *arg_conn;
   struct netconn *conn;
   struct netbuf *inbuf;
-  struct_out *qstruct;
   uint8_t* buf;
   u16_t buflen;
-  arg_conn = (struct_conn*) arg;
-  conn = (void*)arg_conn->conn;
   for(;;)
   {
   	
@@ -247,16 +270,21 @@ static void recv_thread(void *arg)
   	  if (netconn_err(conn) == ERR_OK)
   	  {
   	    netbuf_data(inbuf, (void**)&buf, &buflen);
-  	    if(buflen>1)
-  	    {
-  	      osMailPut(strout_Queue, qstruct);
-  	      osMailFree(strout_Queue, qstruct);
-  	    }
+				sprintf (UART3_msg_TX,"%s\r\n", buf);
+				UART3_SendString ((char*)UART3_msg_TX);
   	    netbuf_delete(inbuf);
   	  }
   	}
+		osDelay(1000);
   }
 }
+
+/************************************************************************************************/
+void ProgTimerIWDGCallback(void const *argument)
+{
+	HAL_IWDG_Refresh(&hiwdg); //перезагрузка iwdg
+}
+
 /* USER CODE END Application */
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

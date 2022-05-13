@@ -30,7 +30,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "st7735.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -111,11 +111,29 @@ int main(void)
   MX_I2C1_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
-  MX_IWDG_Init();
+//  MX_IWDG_Init();
   MX_SPI3_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
+	lcdInit();
+	ClearLcdMemory();
+	LCD_SetFont(Arial_15x17,black);
+	LCD_ShowString(5,10,"controller_staring...");
+	LCD_Refresh();
 	
+	ENABLE_ETHERNET;
+	
+	if (READ_BIT (RCC->CSR, RCC_CSR_IWDGRSTF)) //если установлен бит IWDGRST (флаг срабатывания IWDG)
+	{
+		SET_BIT (RCC->CSR, RCC_CSR_RMVF); //сброс флага срабатывания IWDG
+		sprintf (UART3_msg_TX,"UDS_controller_start_after_iwdg_reset\r\n");
+		UART3_SendString ((char*)UART3_msg_TX);	
+	}
+	else
+	{
+		sprintf (UART3_msg_TX,"UDS_controller_start\r\n");
+		UART3_SendString ((char*)UART3_msg_TX);	
+	}
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in freertos.c) */
